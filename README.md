@@ -1,7 +1,6 @@
 # browser-video-compression
 
-[![npm](https://img.shields.io/npm/v/browser-video-compression.svg)](https://www.npmjs.com/package/browser-video-compression)
-[![license](https://img.shields.io/npm/l/browser-video-compression.svg)](./LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 Compress videos in the browser before they are uploaded. Built on [WebCodecs](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API) through [Mediabunny](https://mediabunny.dev): no server round trip, no ffmpeg.wasm download, and hardware-accelerated encoding where the device supports it.
 
@@ -27,8 +26,10 @@ To try this package locally: clone the repository, run `npm install && npm run b
 ## Install
 
 ```bash
-npm install browser-video-compression
+npm install github:karuha-m/browser-video-compression
 ```
+
+The package builds itself on install (`prepare`), so the import name stays `browser-video-compression`.
 
 ## Usage
 
