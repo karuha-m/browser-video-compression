@@ -1,0 +1,47 @@
+{
+  "name": "browser-video-compression",
+  "version": "0.1.0",
+  "description": "Compress videos in the browser before upload. WebCodecs-based, no server, no ffmpeg.wasm. Falls back to the original file whenever compression is not possible.",
+  "keywords": [
+    "video",
+    "compression",
+    "compress",
+    "upload",
+    "browser",
+    "webcodecs",
+    "mp4",
+    "h264",
+    "resize",
+    "client-side"
+  ],
+  "homepage": "https://www.videokit.cc/en/browser-video-compression",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/karuha-m/browser-video-compression.git"
+  },
+  "bugs": "https://github.com/karuha-m/browser-video-compression/issues",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "mediabunny": "^1.61.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

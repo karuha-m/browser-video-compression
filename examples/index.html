@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>browser-video-compression example</title>
+    <!-- Run `npm run build` first, then serve the repository root, e.g. `npx serve .` -->
+    <script type="importmap">
+      { "imports": { "mediabunny": "https://esm.sh/mediabunny@1" } }
+    </script>
+    <style>
+      body { font: 16px/1.5 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      progress { width: 100%; }
+      pre { background: #f4f4f5; padding: 12px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Compress before upload</h1>
+    <input id="file" type="file" accept="video/*" />
+    <p><progress id="progress" max="1" value="0"></progress></p>
+    <pre id="log">Choose a video file.</pre>
+    <p><a id="download" hidden>Download compressed file</a></p>
+
+    <script type="module">
+      import { compressVideo, inspectVideo, isCompressionSupported } from '../dist/index.js';
+
+      const log = document.getElementById('log');
+      const progress = document.getElementById('progress');
+      const download = document.getElementById('download');
+      const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+
+      log.textContent = `Compression supported: ${await isCompressionSupported()}`;
+
+      document.getElementById('file').addEventListener('change', async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        download.hidden = true;
+        progress.value = 0;
+
+        const info = await inspectVideo(file);
+        log.textContent = `Input: ${info.width}x${info.height}, ${info.duration.toFixed(1)} s, ${mb(info.size)}\n`;
+
+        const started = performance.now();
+        const result = await compressVideo(file, {
+          maxWidthOrHeight: 1280,
+          onProgress: (value) => { progress.value = value; },
+        });
+        const seconds = ((performance.now() - started) / 1000).toFixed(1);
+
+        log.textContent += result.compressed
+          ? `Output: ${result.width}x${result.height}, ${mb(result.size)} (${Math.round((1 - result.size / result.originalSize) * 100)}% smaller) in ${seconds} s`
+          : `Kept original: ${result.skipReason}${result.error ? ` (${result.error})` : ''}`;
+
+        // In a real app: const body = new FormData(); body.append('video', result.file); await fetch('/upload', { method: 'POST', body });
+        download.href = URL.createObjectURL(result.file);
+        download.download = result.file.name;
+        download.hidden = false;
+      });
+    </script>
+  </body>
+</html>
