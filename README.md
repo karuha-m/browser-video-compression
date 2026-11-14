@@ -26,10 +26,12 @@ To try this package locally: clone the repository, run `npm install && npm run b
 ## Install
 
 ```bash
-npm install github:karuha-m/browser-video-compression
+npm install https://github.com/karuha-m/browser-video-compression/releases/download/v0.1.0/browser-video-compression-0.1.0.tgz
 ```
 
-The package builds itself on install (`prepare`), so the import name stays `browser-video-compression`.
+The release tarball contains the built package and installs the same way with npm, pnpm, Yarn and Bun. The import name is `browser-video-compression`.
+
+With npm you can also install straight from the repository (`npm install github:karuha-m/browser-video-compression`); npm builds it on install through `prepare`. Bun does not run `prepare` for Git dependencies, so use the release tarball there.
 
 ## Usage
 

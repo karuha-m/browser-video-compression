@@ -10,6 +10,8 @@ permissions:
 
 jobs:
   publish:
+    # Releases also carry the packed tarball; publishing to npm starts once the npm account is configured.
+    if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
