@@ -31,9 +31,13 @@
 
       log.textContent = `Compression supported: ${await isCompressionSupported()}`;
 
+      let previous;
+
       document.getElementById('file').addEventListener('change', async (event) => {
         const file = event.target.files[0];
         if (!file) return;
+        // The previous output is no longer needed once a new file is chosen.
+        await previous?.dispose();
         download.hidden = true;
         progress.value = 0;
 
@@ -50,8 +54,10 @@
         log.textContent += result.compressed
           ? `Output: ${result.width}x${result.height}, ${mb(result.size)} (${Math.round((1 - result.size / result.originalSize) * 100)}% smaller) in ${seconds} s`
           : `Kept original: ${result.skipReason}${result.error ? ` (${result.error})` : ''}`;
+        if (result.compressed) log.textContent += `\nStored in: ${result.storage}`;
+        previous = result;
 
-        // In a real app: const body = new FormData(); body.append('video', result.file); await fetch('/upload', { method: 'POST', body });
+        // In a real app: upload result.file, then call result.dispose() once the upload has settled.
         download.href = URL.createObjectURL(result.file);
         download.download = result.file.name;
         download.hidden = false;

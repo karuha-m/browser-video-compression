@@ -15,6 +15,7 @@ Documentation: [videokit.cc/en/browser-video-compression](https://www.videokit.c
 - **Audio is copied untouched** when the container accepts it, so the soundtrack is never degraded or dropped.
 - **Preflight checks** with `inspectVideo()`: duration, resolution, codecs and bitrate read from container metadata, without decoding the file.
 - **Progress, cancellation and stall detection**: `onProgress`, `AbortSignal`, and a watchdog for hardware encoders that stop producing frames without an error.
+- **Output streamed to disk.** Where the browser supports the Origin Private File System (OPFS), the compressed file is written to disk as it is encoded instead of being held in memory, and stays there until you call `result.dispose()`.
 - **Tree-shakable ESM with TypeScript types.** No cross-origin isolation (COOP/COEP) headers required.
 
 ## Demo
@@ -26,7 +27,7 @@ To try this package locally: clone the repository, run `npm install && npm run b
 ## Install
 
 ```bash
-npm install https://github.com/karuha-m/browser-video-compression/releases/download/v0.1.0/browser-video-compression-0.1.0.tgz
+npm install https://github.com/karuha-m/browser-video-compression/releases/download/v0.2.0/browser-video-compression-0.2.0.tgz
 ```
 
 The release tarball contains the built package and installs the same way with npm, pnpm, Yarn and Bun. The import name is `browser-video-compression`.
@@ -57,11 +58,21 @@ document.getElementById('video').addEventListener('change', async (event) => {
       : `uploading original (${result.skipReason})`,
   );
 
-  const body = new FormData();
-  body.append('video', result.file);
-  await fetch('/upload', { method: 'POST', body });
+  try {
+    const body = new FormData();
+    body.append('video', result.file);
+    await fetch('/upload', { method: 'POST', body });
+  } finally {
+    await result.dispose(); // delete the compressed file once the upload has settled
+  }
 });
 ```
+
+### Releasing the output
+
+When OPFS is available (`result.storage === 'opfs'`), `result.file` is backed by a file in the browser's private storage. It stays readable for as long as you need it, so a queued upload or a retried chunk can read it again later. Call `result.dispose()` once the upload has succeeded or been abandoned; after that `result.file` can no longer be read.
+
+If the tab is closed before `dispose()` is called, the file is removed the next time `compressVideo()` runs in any tab of the same origin. Results that are still alive in another tab are never touched. Outputs held in memory (`storage: 'memory'`) are released by the garbage collector, and `dispose()` does nothing for them; calling it is always safe.
 
 ### With an upload library
 
@@ -70,8 +81,11 @@ document.getElementById('video').addEventListener('change', async (event) => {
 ```js
 import * as tus from 'tus-js-client';
 
-const { file } = await compressVideo(original);
-new tus.Upload(file, { endpoint: '/files/' }).start();
+const result = await compressVideo(original);
+new tus.Upload(result.file, {
+  endpoint: '/files/',
+  onSuccess: () => result.dispose(),
+}).start();
 ```
 
 ### Cancelling
@@ -115,6 +129,7 @@ if (info.duration > 600) {
 | `onProgress` | `(progress: number) => void` | – | Progress between 0 and 1. |
 | `signal` | `AbortSignal` | – | Cancels compression; the promise rejects with `AbortError`. |
 | `stallTimeoutMs` | `number` | `90000` | Gives up (and returns the original) when the encoder makes no progress for this long while the page is visible. |
+| `storage` | `'auto' \| 'memory'` | `'auto'` | `auto` streams the output to OPFS when available and falls back to memory; `memory` always keeps it in memory. |
 
 `CompressVideoResult`:
 
@@ -126,6 +141,8 @@ if (info.duration > 600) {
 | `error` | `unknown` | Underlying error when `skipReason` is `'failed'`. |
 | `originalSize` / `size` | `number` | Bytes before and after. |
 | `width` / `height` / `duration` | `number` | Output dimensions in pixels and duration in seconds, when known. |
+| `storage` | `'opfs' \| 'memory'` | Where the compressed `file` is stored. Present only when `compressed` is `true`. |
+| `dispose` | `() => Promise<void>` | Deletes the compressed output from OPFS. Call it after the upload has settled. Safe to call more than once. |
 
 The promise rejects only when `signal` is aborted.
 
@@ -161,7 +178,7 @@ Without it, such files are returned unchanged with `skipReason: 'unsupported-bro
 
 ## Notes
 
-- **Memory.** The compressed output is held in memory until it is returned. For files beyond roughly 2 GB on mobile devices, consider passing the original through (`skipBelowMB`) or lowering `maxWidthOrHeight`.
+- **Memory and storage.** When the browser can write files to OPFS (detected at runtime; current Chrome, Edge and Firefox can) the output is written to disk and only the encoding pipeline uses memory. Elsewhere the output is held in memory, as reported by `storage: 'memory'`; on such browsers, for files beyond roughly 2 GB on mobile devices, consider passing the original through (`skipBelowMB`) or lowering `maxWidthOrHeight`. MP4 output written to disk keeps its index at the end of the file; players and servers that read with range requests handle this, and most upload pipelines transcode anyway.
 - **Background tabs.** Browsers throttle background tabs, so compression slows down when the user switches away. Time spent hidden is not counted by the stall watchdog.
 - **Web Workers.** The package uses only APIs available in workers, so it can run inside a dedicated worker if you prefer to keep the main thread free.
 - **Privacy.** Files are processed on the user's device; nothing is sent anywhere by this package.

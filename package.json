@@ -1,6 +1,6 @@
 {
   "name": "browser-video-compression",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Compress videos in the browser before upload. WebCodecs-based, no server, no ffmpeg.wasm. Falls back to the original file whenever compression is not possible.",
   "keywords": [
     "video",

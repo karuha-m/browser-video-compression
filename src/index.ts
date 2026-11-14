@@ -2,7 +2,6 @@ import {
   ALL_FORMATS,
   type AudioCodec,
   BlobSource,
-  BufferTarget,
   Conversion,
   Input,
   Mp4OutputFormat,
@@ -16,6 +15,9 @@ import {
   canEncodeAudio,
   canEncodeVideo,
 } from 'mediabunny';
+import { type OutputStorage, createOutputSink } from './storage.js';
+
+export type { OutputStorage } from './storage.js';
 
 export type OutputFormat = 'mp4' | 'webm';
 export type CompressionQuality = 'low' | 'medium' | 'high';
@@ -51,6 +53,12 @@ export interface CompressVideoOptions {
    * compression is cancelled and the original file is returned. Default: `90000`.
    */
   stallTimeoutMs?: number;
+  /**
+   * Where the compressed output is written. `'auto'` streams it to the Origin
+   * Private File System when the browser supports it and keeps it in memory
+   * otherwise; `'memory'` always keeps it in memory. Default: `'auto'`.
+   */
+  storage?: 'auto' | 'memory';
 }
 
 export type SkipReason =
@@ -84,6 +92,18 @@ export interface CompressVideoResult {
   height?: number;
   /** Duration in seconds, when known. */
   duration?: number;
+  /**
+   * Where the compressed `file` is stored: `'opfs'` (on disk, in the Origin
+   * Private File System) or `'memory'`. Present only when `compressed` is `true`.
+   */
+  storage?: OutputStorage;
+  /**
+   * Deletes the compressed output from OPFS. Call it once the upload has
+   * succeeded or been abandoned; `file` cannot be read afterwards. Until then
+   * the output stays available for deferred uploads and chunk retries. Safe to
+   * call more than once, and a no-op when nothing needs releasing.
+   */
+  dispose: () => Promise<void>;
 }
 
 export interface VideoInfo {
@@ -241,6 +261,8 @@ async function pickVideoCodec(
   return undefined;
 }
 
+const noop = async () => {};
+
 async function runConversion(
   conversion: Conversion,
   options: {
@@ -254,6 +276,10 @@ async function runConversion(
   let lastTick = Date.now();
   let timer: ReturnType<typeof setInterval> | undefined;
   let onAbort: (() => void) | undefined;
+  let cancelling: Promise<void> | undefined;
+  const cancel = () => {
+    cancelling ??= conversion.cancel().catch(() => undefined);
+  };
 
   conversion.onProgress = (progress) => {
     idleMs = 0;
@@ -274,14 +300,13 @@ async function runConversion(
       }
       idleMs += delta;
       if (idleMs < stallTimeoutMs) return;
-      // A stalled encoder may never acknowledge cancel(); do not wait for it.
-      void conversion.cancel().catch(() => undefined);
+      cancel();
       reject(new StalledError(idleMs));
     }, STALL_CHECK_INTERVAL_MS);
 
     if (signal) {
       onAbort = () => {
-        void conversion.cancel().catch(() => undefined);
+        cancel();
         reject(abortError(signal));
       };
       signal.addEventListener('abort', onAbort, { once: true });
@@ -293,6 +318,14 @@ async function runConversion(
   } finally {
     clearInterval(timer);
     if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+    // Let the output close its file before it is deleted. A stalled encoder may
+    // never acknowledge cancel(), so the wait is bounded.
+    if (cancelling) {
+      await Promise.race([
+        cancelling,
+        new Promise((resolve) => setTimeout(resolve, STALL_CHECK_INTERVAL_MS)),
+      ]);
+    }
   }
 }
 
@@ -303,6 +336,9 @@ async function runConversion(
  * cannot compress the file, or the result would not be smaller, the original
  * file is returned with `compressed: false` and a `skipReason`, so the upload
  * can always proceed. It rejects only when `signal` is aborted.
+ *
+ * Call `result.dispose()` after the upload has succeeded or been abandoned to
+ * delete the compressed output from browser storage.
  */
 export async function compressVideo(
   source: File | Blob,
@@ -319,6 +355,7 @@ export async function compressVideo(
     onProgress,
     signal,
     stallTimeoutMs = 90_000,
+    storage = 'auto',
   } = options;
 
   const original = toFile(source);
@@ -331,6 +368,7 @@ export async function compressVideo(
     skipReason,
     originalSize: original.size,
     size: original.size,
+    dispose: noop,
     ...extra,
   });
 
@@ -347,6 +385,8 @@ export async function compressVideo(
     source: new BlobSource(original),
     formats: ALL_FORMATS,
   });
+  let sink: Awaited<ReturnType<typeof createOutputSink>> | undefined;
+  let keepOutput = false;
 
   try {
     let videoTrack: Awaited<ReturnType<Input['getPrimaryVideoTrack']>>;
@@ -395,9 +435,10 @@ export async function compressVideo(
     }
 
     const firstTimestamp = await input.getFirstTimestamp();
+    sink = await createOutputSink(`output.${format}`, storage);
     const output = new Output({
       format: format === 'webm' ? new WebMOutputFormat() : new Mp4OutputFormat(),
-      target: new BufferTarget(),
+      target: sink.target,
     });
     const conversion = await Conversion.init({
       input,
@@ -438,9 +479,8 @@ export async function compressVideo(
       return skip('failed', { ...sourceInfo, error });
     }
 
-    const buffer = output.target.buffer;
-    if (!buffer) return skip('failed', sourceInfo);
-    const blob = new Blob([buffer], { type: output.format.mimeType });
+    const blob = await sink.finish(output.format.mimeType);
+    if (!blob) return skip('failed', sourceInfo);
 
     // An encoder that emits no frames still yields a valid container; verify the result.
     const check = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
@@ -467,6 +507,7 @@ export async function compressVideo(
       type: blob.type,
       lastModified: original.lastModified,
     });
+    keepOutput = true;
     return {
       file,
       compressed: true,
@@ -475,11 +516,16 @@ export async function compressVideo(
       width: target.width,
       height: target.height,
       duration,
+      storage: sink.storage,
+      dispose: sink.release,
     };
   } catch (error) {
     if (signal?.aborted) throw abortError(signal);
     return skip('failed', { error });
   } finally {
     input.dispose();
+    // Whenever the original is returned (or compression is aborted), nothing
+    // references the output any more, so it is deleted right away.
+    if (sink && !keepOutput) await sink.release();
   }
 }
